@@ -267,7 +267,7 @@ def create_patches(
 
         s = slice(i*n_patches_per_image,(i+1)*n_patches_per_image)
         X[s], Y[s] = normalization(_X,_Y, x,y,mask,channel)
-        Z[s] = sample_smaller_patches_from_raw(X[s], patch_size, scale_gt)
+        Z[s] = sample_smaller_patches_from_raw(X[s],  scale_gt)
 
     if shuffle:
         shuffle_inplace(Z,Y)
@@ -286,13 +286,10 @@ def create_patches(
 
     return Z,Y,axes
 
-def sample_smaller_patches_from_raw(raw_patches, patch_size, scale_gt):
+def sample_smaller_patches_from_raw(raw_patches,  scale_gt):
     """Sample smaller patches from raw image to match the scale factor."""
-    new_patch_size = tuple(int(s / scale_gt) for s in patch_size[1:])  
-    smaller_raw_patches = np.zeros((raw_patches.shape[0],   raw_patches.shape[1]) + new_patch_size, dtype=raw_patches.dtype)
-    for i in range(raw_patches.shape[0]):
-        for j in range(raw_patches.shape[1]):
-                smaller_raw_patches[i, j] = raw_patches[i, j, :new_patch_size[0], :new_patch_size[1]]  
+    smaller_raw_patches = zoom(raw_patches, zoom=(1, 1,  1.0/scale_gt, 1.0/scale_gt))
+   
     return smaller_raw_patches
 
 
