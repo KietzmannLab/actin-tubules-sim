@@ -17,11 +17,6 @@ This [caped] package was generated with [Cookiecutter] using [@caped]'s [cookiec
 
 ## Installation
 
-You can install `actin-tubules-sim` via [pip]:
-
-    pip install actin-tubules-sim
-
-
 
 To install latest development version :
 
