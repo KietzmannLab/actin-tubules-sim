@@ -135,21 +135,57 @@ def RCANNSM3D(input_shape, n_ResGroup=4, n_RCAB=5):
     return model
 
 
+def global_average_pooling(input):
+    return tf.reduce_mean(input, axis=(1, 2), keepdims=True)
+
+
+def FCALayer(input, channel, reduction=16):
+    absfft1 = Lambda(fft2)(input)
+    absfft1 = Lambda(fftshift)(absfft1)
+    absfft1 = tf.abs(absfft1, name="absfft1")
+    absfft1 = tf.cast(absfft1, dtype=tf.float32)
+    absfft2 = Conv2D(
+        channel, kernel_size=3, activation="relu", padding="same"
+    )(absfft1)
+    W = Lambda(global_average_pooling)(absfft2)
+    W = Conv2D(
+        channel // reduction, kernel_size=1, activation="relu", padding="same"
+    )(W)
+    W = Conv2D(channel, kernel_size=1, activation="sigmoid", padding="same")(W)
+    mul = multiply([input, W])
+    return mul
+
+
+def FCAB(input, channel):
+    conv = Conv2D(channel, kernel_size=3, padding="same")(input)
+    conv = Lambda(gelu)(conv)
+    conv = Conv2D(channel, kernel_size=3, padding="same")(conv)
+    conv = Lambda(gelu)(conv)
+    att = FCALayer(conv, channel, reduction=16)
+    output = add([att, input])
+    return output
+
+
+def ResidualGroup2D(input, channel):
+    conv = input
+    n_RCAB = 4
+    for _ in range(n_RCAB):
+        conv = FCAB(conv, channel)
+    conv = add([conv, input])
+    return conv
+
+
 def DFCAN(input_shape, scale=2):
     inputs = Input(input_shape)
+    print(inputs.shape)
     conv = Conv2D(64, kernel_size=3, padding="same")(inputs)
     conv = Lambda(gelu)(conv)
     n_ResGroup = 4
     for _ in range(n_ResGroup):
-        conv = ResidualGroup(conv, channel=64)
+        conv = ResidualGroup2D(conv, channel=64)
     conv = Conv2D(64 * (scale**2), kernel_size=3, padding="same")(conv)
     conv = Lambda(gelu)(conv)
 
-    print(
-        pixelshuffle,
-        type(pixelshuffle),
-        "-------------------------!!!!!!!!!!!!!!    pixel shuffel being printed   !!!!!!!!!!!!!!! V",
-    )
     upsampled = Lambda(pixelshuffle, arguments={"scale": scale})(conv)
     conv = Conv2D(1, kernel_size=3, padding="same")(upsampled)
     output = Activation("sigmoid")(conv)
@@ -163,11 +199,7 @@ def gelu(x):
 
 
 def pixelshuffle(layer_in, scale):
-    print(
-        "  !!!!!!!!!!!!!!!!!!    this is the layer_in    !!!!!!!!!!!!!!!!",
-        layer_in,
-        scale,
-    )
+    print(f"{layer_in},{scale}")
     return tf.nn.depth_to_space(
         layer_in, block_size=scale
     )  # here I changes :  block_size=scale :  to :  block_size=2*scale  :
