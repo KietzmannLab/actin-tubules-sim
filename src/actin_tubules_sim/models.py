@@ -275,7 +275,7 @@ def ResidualGroupwShape(input, input_height, input_width, channel):
     return output
 
 
-def Denoiser(
+def DenoiserNSM(
     input_shape, n_rg=(2, 5, 5), init_cutoff_freq=4.95, init_slop=100
 ):
 
@@ -313,6 +313,61 @@ def Denoiser(
     # --------------------------------------------------------------------------------
     #                              merge features
     # --------------------------------------------------------------------------------
+    conct = add([conv1, conv2])
+    conct = Conv2D(64, kernel_size=3, padding="same")(conct)
+    conct = LeakyReLU(alpha=0.2)(conct)
+    conv = conct
+
+    for _ in range(n_rg[2]):
+        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+    conv = add([conv, conct])
+
+    conv = Conv2D(256, kernel_size=3, padding="same")(conv)
+    conv = LeakyReLU(alpha=0.2)(conv)
+
+    CA = CALayerwShape(conv, input_shape[0], input_shape[1], 256, reduction=16)
+    conv = Conv2D(input_shape[2], kernel_size=3, padding="same")(CA)
+
+    output = LeakyReLU(alpha=0.2)(conv)
+
+    model = Model(inputs=[inputs1, inputs2], outputs=output)
+    return model
+
+
+def Denoiser(input_shape, n_rg=(2, 5, 5)):
+
+    inputs1 = Input(input_shape)
+    inputs2 = Input(input_shape)
+    # --------------------------------------------------------------------------------
+    #                      extract features of generated image
+    # --------------------------------------------------------------------------------
+    conv0 = Conv2D(64, kernel_size=3, padding="same")(inputs1)
+    conv = LeakyReLU(alpha=0.2)(conv0)
+    for _ in range(n_rg[0]):
+        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+    conv = add([conv, conv0])
+    conv = Conv2D(64, kernel_size=3, padding="same")(conv)
+    conv1 = LeakyReLU(alpha=0.2)(conv)
+
+    # --------------------------------------------------------------------------------
+    #                      extract features of noisy image
+    # --------------------------------------------------------------------------------
+    conv0 = Conv2D(64, kernel_size=3, padding="same")(inputs2)
+    conv = LeakyReLU(alpha=0.2)(conv0)
+    for _ in range(n_rg[1]):
+        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+    conv = add([conv, conv0])
+    conv = Conv2D(64, kernel_size=3, padding="same")(conv)
+    conv2 = LeakyReLU(alpha=0.2)(conv)
+
+    # --------------------------------------------------------------------------------
+    #                              merge features
+    # --------------------------------------------------------------------------------
+    weight1 = Lambda(lambda x: x * 1)
+    weight2 = Lambda(lambda x: x * 1)
+    conv1 = weight1(conv1)
+    conv2 = weight2(conv2)
+
     conct = add([conv1, conv2])
     conct = Conv2D(64, kernel_size=3, padding="same")(conct)
     conct = LeakyReLU(alpha=0.2)(conct)
