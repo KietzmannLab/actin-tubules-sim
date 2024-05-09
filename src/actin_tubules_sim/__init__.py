@@ -3,6 +3,7 @@ try:
 except ImportError:
     __version__ = "unknown"
 
+from .loss import mae_ssim, mse_gar, mse_ssim, mse_ssim_3d
 from .models import (
     DFCAN,
     NSM,
@@ -24,13 +25,16 @@ from .models import (
     ifft2,
     pixelshuffle,
 )
-from .prepare_datasets import convert_mrc_to_tiff, create_folders
-from .loss import mae_ssim, mse_gar, mse_ssim, mse_ssim_3d
-
+from .prepare_datasets import (
+    convert_mrc_to_tiff,
+    create_folders_DN,
+    create_folders_SR,
+)
 
 __all__ = [
     "convert_mrc_to_tiff",
-    "create_folders",
+    "create_folders_SR",
+    "create_folders_DN",
     "DenoiserNSM",
     "Denoiser",
     "DFCAN",
@@ -53,5 +57,5 @@ __all__ = [
     "mae_ssim",
     "mse_gar",
     "mse_ssim",
-    "mse_ssim_3d"
+    "mse_ssim_3d",
 ]
