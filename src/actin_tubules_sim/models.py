@@ -81,7 +81,7 @@ def CALayer(input, channel, reduction=16):
     return mul
 
 
-def RCAB(input, channel):
+def RCAB3D(input, channel):
     conv = Conv3D(channel, kernel_size=3, padding="same")(input)
     conv = LeakyReLU(alpha=0.2)(conv)
     conv = Conv3D(channel, kernel_size=3, padding="same")(conv)
@@ -94,7 +94,7 @@ def RCAB(input, channel):
 def ResidualGroup(input, channel, n_RCAB=5):
     conv = input
     for _ in range(n_RCAB):
-        conv = RCAB(conv, channel)
+        conv = RCAB3D(conv, channel)
     return conv
 
 
@@ -166,7 +166,7 @@ def FCAB(input, channel):
     return output
 
 
-def ResidualGroup2D(input, channel):
+def ResidualGroup(input, channel):
     conv = input
     n_RCAB = 4
     for _ in range(n_RCAB):
@@ -182,7 +182,7 @@ def DFCAN(input_shape, scale=2):
     conv = Lambda(gelu)(conv)
     n_ResGroup = 4
     for _ in range(n_ResGroup):
-        conv = ResidualGroup2D(conv, channel=64)
+        conv = ResidualGroup(conv, channel=64)
     conv = Conv2D(64 * (scale**2), kernel_size=3, padding="same")(conv)
     conv = Lambda(gelu)(conv)
 
@@ -277,7 +277,7 @@ def fftshift(input):
     return output
 
 
-def CALayerwShape(input, input_height, input_width, channel, reduction=16):
+def CALayer2D(input, input_height, input_width, channel, reduction=16):
     W = AveragePooling2D(pool_size=(input_height, input_width))(input)
     W = Conv2D(
         channel // reduction, kernel_size=1, activation="relu", padding="same"
@@ -288,21 +288,21 @@ def CALayerwShape(input, input_height, input_width, channel, reduction=16):
     return mul
 
 
-def RCABwShape(input, input_height, input_width, channel):
+def RCAB2D(input, input_height, input_width, channel):
     conv = Conv2D(channel, kernel_size=3, padding="same")(input)
     conv = LeakyReLU(alpha=0.2)(conv)
     conv = Conv2D(channel, kernel_size=3, padding="same")(conv)
     conv = LeakyReLU(alpha=0.2)(conv)
-    att = CALayerwShape(conv, input_height, input_width, channel, reduction=16)
+    att = CALayer2D(conv, input_height, input_width, channel, reduction=16)
     output = add([att, input])
     return output
 
 
-def ResidualGroupwShape(input, input_height, input_width, channel):
+def ResidualGroup2D(input, input_height, input_width, channel):
     conv = input
     n_RCAB = 5
     for _ in range(n_RCAB):
-        conv = RCABwShape(conv, input_height, input_width, channel)
+        conv = RCAB2D(conv, input_height, input_width, channel)
     output = add([conv, input])
     return output
 
@@ -326,7 +326,7 @@ def DenoiserNSM(
     conv0 = Conv2D(64, kernel_size=3, padding="same")(inputs1)
     conv = LeakyReLU(alpha=0.2)(conv0)
     for _ in range(n_rg[0]):
-        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+        conv = ResidualGroup2D(conv, input_shape[0], input_shape[1], 64)
     conv = add([conv, conv0])
     conv = Conv2D(64, kernel_size=3, padding="same")(conv)
     conv1 = LeakyReLU(alpha=0.2)(conv)
@@ -337,7 +337,7 @@ def DenoiserNSM(
     conv0 = Conv2D(64, kernel_size=3, padding="same")(inputs2_oa)
     conv = LeakyReLU(alpha=0.2)(conv0)
     for _ in range(n_rg[1]):
-        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+        conv = ResidualGroup2D(conv, input_shape[0], input_shape[1], 64)
     conv = add([conv, conv0])
     conv = Conv2D(64, kernel_size=3, padding="same")(conv)
     conv2 = LeakyReLU(alpha=0.2)(conv)
@@ -351,13 +351,13 @@ def DenoiserNSM(
     conv = conct
 
     for _ in range(n_rg[2]):
-        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+        conv = ResidualGroup2D(conv, input_shape[0], input_shape[1], 64)
     conv = add([conv, conct])
 
     conv = Conv2D(256, kernel_size=3, padding="same")(conv)
     conv = LeakyReLU(alpha=0.2)(conv)
 
-    CA = CALayerwShape(conv, input_shape[0], input_shape[1], 256, reduction=16)
+    CA = CALayer2D(conv, input_shape[0], input_shape[1], 256, reduction=16)
     conv = Conv2D(input_shape[2], kernel_size=3, padding="same")(CA)
 
     output = LeakyReLU(alpha=0.2)(conv)
@@ -376,7 +376,7 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
     conv0 = Conv2D(64, kernel_size=3, padding="same")(inputs1)
     conv = LeakyReLU(alpha=0.2)(conv0)
     for _ in range(n_rg[0]):
-        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+        conv = ResidualGroup2D(conv, input_shape[0], input_shape[1], 64)
     conv = add([conv, conv0])
     conv = Conv2D(64, kernel_size=3, padding="same")(conv)
     conv1 = LeakyReLU(alpha=0.2)(conv)
@@ -387,7 +387,7 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
     conv0 = Conv2D(64, kernel_size=3, padding="same")(inputs2)
     conv = LeakyReLU(alpha=0.2)(conv0)
     for _ in range(n_rg[1]):
-        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+        conv = ResidualGroup2D(conv, input_shape[0], input_shape[1], 64)
     conv = add([conv, conv0])
     conv = Conv2D(64, kernel_size=3, padding="same")(conv)
     conv2 = LeakyReLU(alpha=0.2)(conv)
@@ -406,13 +406,13 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
     conv = conct
 
     for _ in range(n_rg[2]):
-        conv = ResidualGroupwShape(conv, input_shape[0], input_shape[1], 64)
+        conv = ResidualGroup2D(conv, input_shape[0], input_shape[1], 64)
     conv = add([conv, conct])
 
     conv = Conv2D(256, kernel_size=3, padding="same")(conv)
     conv = LeakyReLU(alpha=0.2)(conv)
 
-    CA = CALayerwShape(conv, input_shape[0], input_shape[1], 256, reduction=16)
+    CA = CALayer2D(conv, input_shape[0], input_shape[1], 256, reduction=16)
     conv = Conv2D(input_shape[2], kernel_size=3, padding="same")(CA)
 
     output = LeakyReLU(alpha=0.2)(conv)
