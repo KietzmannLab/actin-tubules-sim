@@ -299,7 +299,7 @@ def getmodamp(k0angle, k0length, bands, overlap0, overlap1, Nx, Ny, order1, orde
 def cal_modamp(image, OTF, pParam):
     # Parameters initialization
     Nx, Ny = pParam['Nx'], pParam['Ny']
-    lamda = pParam['lamda']
+    lamda = pParam['wavelength']
     dxy = pParam['dxy']
     ndirs, nphases = pParam['ndirs'], pParam['nphases']
     norders, napodize = pParam['norders'], pParam['napodize']
