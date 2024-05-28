@@ -1,4 +1,6 @@
 import tensorflow as tf
+import numpy as np
+import numpy.fft as F
 import tensorflow.keras.backend as K
 from tensorflow.keras.initializers import constant as const
 from tensorflow.keras.layers import (
@@ -16,7 +18,7 @@ from tensorflow.keras.layers import (
     multiply,
 )
 from tensorflow.keras.models import Model
-
+from .sim_fitting import cal_modamp
 
 class NoiseSuppressionModule(Layer):
 
@@ -419,3 +421,135 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
 
     model = Model(inputs=[inputs1, inputs2], outputs=output)
     return model
+
+
+class Train_RDL_Denoising(tf.keras.Model):
+    def __init__(self, srmodel, denmodel, loss_fn, optimizer, OTF, pParam):
+        super(Train_RDL_Denoising, self).__init__()
+        self.srmodel = srmodel
+        self.denmodel = denmodel
+        self.loss_fn = loss_fn
+        self.optimizer = optimizer
+        self.OTF = OTF
+        self.pParam = pParam 
+        self.nphases = self.pParam['nphases']
+        self.ndirs = self.pParam['ndirs']
+        self.space = self.pParam['space']
+        self.Ny = self.pParam['Ny']
+        self.Nx = self.pParam['Nx']
+        self.phase_space = 2 * np.pi / self.nphases
+        self.scale = self.pParam['scale']
+        self.dxy = self.pParam['dxy']
+        [self.Nx_hr, self.Ny_hr] = [self.Nx, self.Ny] * self.scale
+        [self.dx_hr, self.dy_hr] = [x / self.scale for x in [self.dxy, self.dxy]]
+
+        xx = self.dx_hr * np.arange(-self.Nx_hr / 2, self.Nx_hr / 2, 1)
+        yy = self.dy_hr * np.arange(-self.Ny_hr / 2, self.Ny_hr / 2, 1)
+        [self.X, self.Y] = np.meshgrid(xx, yy)
+
+    
+    
+    def _phase_computation(self, img_SR, modamp, cur_k0_angle, cur_k0):
+        
+        phase_list = -np.angle(modamp)
+
+        # Create meshgrid of indices for phases
+        phases = np.arange(self.nphases)
+        
+        # Vectorized calculations for kxL, kyL, kxR, kyR
+        alphas = cur_k0_angle[:, np.newaxis]
+        kxL = cur_k0[:, np.newaxis] * np.pi * np.cos(alphas)
+        kyL = cur_k0[:, np.newaxis] * np.pi * np.sin(alphas)
+        kxR = -kxL
+        kyR = -kyL
+
+        # Vectorized phase offsets
+        phOffsets = phase_list[:, np.newaxis] + phases * self.phase_space
+       
+        # Vectorized calculations for interBeam
+        kxL_grid, X_grid = np.meshgrid(kxL, self.X, indexing='ij')
+        kyL_grid, Y_grid = np.meshgrid(kyL, self.Y, indexing='ij')
+        kxR_grid, _ = np.meshgrid(kxR, self.X, indexing='ij')
+        kyR_grid, _ = np.meshgrid(kyR, self.Y, indexing='ij')
+
+        # Creating interBeam patterns
+        interBeam = np.exp(1j * (kxL_grid * X_grid + kyL_grid * Y_grid + phOffsets[:, :, np.newaxis, np.newaxis])) + \
+                    np.exp(1j * (kxR_grid * X_grid + kyR_grid * Y_grid))
+
+        pattern = np.square(np.abs(interBeam))
+
+        # FFT and modulation
+        patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR[np.newaxis, np.newaxis, :, :]), axes=(-2, -1)) * OTF[np.newaxis, np.newaxis, :, :]
+        modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft, axes=(-2, -1)), axes=(-2, -1)))
+
+        # Resize images
+        modulated_img_resized = tf.image.resize(modulated_img, [self.Ny, self.Nx])
+        img_gen = tf.reshape(modulated_img_resized, [self.ndirs, self.nphases, self.Ny, self.Nx])
+        
+        return img_gen 
+    
+    
+    def _get_cur_k(self, image_gt):
+        
+        cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float), self.OTF, self.pParam)
+        cur_k0_angle = np.array(np.arctan(cur_k0[:, 1] / cur_k0[:, 0]))
+        cur_k0_angle[1:self.pParam['ndirs']] = cur_k0_angle[1:self.pParam['ndirs']] + np.pi
+        cur_k0_angle = -(cur_k0_angle - np.pi/2)
+        for nd in range(self.pParam['ndirs']):
+            if np.abs(cur_k0_angle[nd] - self.pParam.k0angle_g[nd]) > 0.05:
+                cur_k0_angle[nd] = self.pParam.k0angle_g[nd]
+        cur_k0 = np.sqrt(np.sum(np.square(cur_k0), 1))
+        given_k0 = 1 / self.pParam['space']
+        cur_k0[np.abs(cur_k0 - given_k0) > 0.1] = given_k0
+    
+        return cur_k0, cur_k0_angle, modamp
+    
+    def _intensity_equilization(self,img_in, image_gt):
+        
+        mean_th_in = np.mean(img_in[:self.nphases, :, :])
+        for d in range(1, self.ndirs):
+                data_d = img_in[d * self.nphases:(d + 1) * self.nphases, :, :]
+                img_in[d * self.nphases:(d + 1) * self.nphases, :, :] = data_d * mean_th_in / np.mean(data_d)
+        mean_th_gt = np.mean(image_gt[:self.nphases, :, :])
+        for d in range(self.ndirs):
+            data_d = image_gt[d * self.nphases:(d + 1) * self.nphases, :, :]
+            image_gt[d * self.nphases:(d + 1) * self.nphases, :, :] = data_d * mean_th_gt / np.mean(data_d)
+        
+        return img_in, image_gt
+    
+    
+    def train_step(self, data):
+        x, y = data
+        
+        input_height = x.shape[1]
+        input_width = x.shape[2]
+        batch_size = x.shape[0]
+        channels = x.shape[-1]
+        
+        sr_y_predict = self.srmodel.predict(x)
+        sr_y_predict = tf.squeeze(sr_y_predict, axis=-1) # Batch, Ny, Nx, 1 
+        # Loop over each example in the batch
+        for i in range(batch_size):
+            # Get the current example
+            img_in = x[i:i+1]  # Extract the i-th example from the batch
+            img_SR = sr_y_predict[i:i+1]  # Extract the corresponding SR output
+            image_gt = y[i:i+1]
+            
+            cur_k0, cur_k0_angle, modamp = self._get_cur_k(image_gt=image_gt)
+            
+            img_in, image_gt = self._intensity_equilization(img_in, image_gt)
+            image_gen = self._phase_computation(img_SR, modamp, cur_k0_angle, cur_k0)
+            
+            # Train denoising
+            with tf.GradientTape() as tape:
+                y_pred = self.denmodel(img_in, training=True) 
+                loss = self.loss_fn(y[i:i+1], y_pred)  
+
+            trainable_vars = self.denmodel.trainable_variables
+            gradients = tape.gradient(loss, trainable_vars)
+
+            self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+
+            self.compiled_metrics.update_state(y[i:i+1], y_pred)
+
+        return {m.name: m.result() for m in self.metrics}

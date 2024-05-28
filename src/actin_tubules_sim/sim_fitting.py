@@ -330,3 +330,12 @@ def cal_modamp(image, OTF, pParam):
     
 
 
+def create_psf(sigma_x, sigma_y, Nx_hr, Ny_hr, dkx, dky):
+    kxx = dkx * np.arange(-Nx_hr / 2, Nx_hr / 2, 1)
+    kyy = dky * np.arange(-Ny_hr / 2, Ny_hr / 2, 1)
+    [dX, dY] = np.meshgrid(kxx, kyy)
+    PSF = np.exp(-0.5 * ((dX / sigma_x) ** 2 + (dY / sigma_y) ** 2))
+    PSF /= np.sum(PSF)  
+    OTF = abs(F.ifftshift(F.ifft2(PSF)))
+    OTF /= np.sum(OTF) 
+    return PSF, OTF

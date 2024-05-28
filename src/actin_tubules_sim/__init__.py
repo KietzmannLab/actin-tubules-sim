@@ -39,7 +39,8 @@ from .sim_fitting import (
     fitxyparabola,
     fitk0andmodamps,
     getmodamp,
-    cal_modamp
+    cal_modamp,
+    create_psf
 )
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "fitk0andmodamps",
     "getmodamp",
     "cal_modamp",
+    "create_psf",
     "convert_mrc_to_tiff",
     "create_folders_SR",
     "create_folders_DN",
