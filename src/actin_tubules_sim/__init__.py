@@ -31,7 +31,26 @@ from .prepare_datasets import (
     create_folders_SR,
 )
 
+from .sim_fitting import (
+    make_matrix,
+    apodize,
+    makeoverlaps,
+    findk0,
+    fitxyparabola,
+    fitk0andmodamps,
+    getmodamp,
+    cal_modamp
+)
+
 __all__ = [
+    "make_matrix",
+    "apodize",
+    "makeoverlaps",
+    "findk0",
+    "fitxyparabola",
+    "fitk0andmodamps",
+    "getmodamp",
+    "cal_modamp",
     "convert_mrc_to_tiff",
     "create_folders_SR",
     "create_folders_DN",
