@@ -424,22 +424,22 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
 
 
 class Train_RDL_Denoising(tf.keras.Model):
-    def __init__(self, srmodel, denmodel, loss_fn, optimizer, OTF, pParam):
+    def __init__(self, srmodel, denmodel, loss_fn, optimizer, OTF, parameters):
         super(Train_RDL_Denoising, self).__init__()
         self.srmodel = srmodel
         self.denmodel = denmodel
         self.loss_fn = loss_fn
         self.optimizer = optimizer
         self.OTF = OTF
-        self.pParam = pParam 
-        self.nphases = self.pParam['nphases']
-        self.ndirs = self.pParam['ndirs']
-        self.space = self.pParam['space']
-        self.Ny = self.pParam['Ny']
-        self.Nx = self.pParam['Nx']
+        self.parameters = parameters 
+        self.nphases = self.parameters['nphases']
+        self.ndirs = self.parameters['ndirs']
+        self.space = self.parameters['space']
+        self.Ny = self.parameters['Ny']
+        self.Nx = self.parameters['Nx']
         self.phase_space = 2 * np.pi / self.nphases
-        self.scale = self.pParam['scale']
-        self.dxy = self.pParam['dxy']
+        self.scale = self.parameters['scale']
+        self.dxy = self.parameters['dxy']
         [self.Nx_hr, self.Ny_hr] = [self.Nx, self.Ny] * self.scale
         [self.dx_hr, self.dy_hr] = [x / self.scale for x in [self.dxy, self.dxy]]
 
@@ -479,7 +479,7 @@ class Train_RDL_Denoising(tf.keras.Model):
         pattern = np.square(np.abs(interBeam))
 
         # FFT and modulation
-        patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR[np.newaxis, np.newaxis, :, :]), axes=(-2, -1)) * OTF[np.newaxis, np.newaxis, :, :]
+        patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR[np.newaxis, np.newaxis, :, :]), axes=(-2, -1)) * self.OTF[np.newaxis, np.newaxis, :, :]
         modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft, axes=(-2, -1)), axes=(-2, -1)))
 
         # Resize images
@@ -491,15 +491,15 @@ class Train_RDL_Denoising(tf.keras.Model):
     
     def _get_cur_k(self, image_gt):
         
-        cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float), self.OTF, self.pParam)
+        cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float), self.OTF, self.parameters)
         cur_k0_angle = np.array(np.arctan(cur_k0[:, 1] / cur_k0[:, 0]))
-        cur_k0_angle[1:self.pParam['ndirs']] = cur_k0_angle[1:self.pParam['ndirs']] + np.pi
+        cur_k0_angle[1:self.parameters['ndirs']] = cur_k0_angle[1:self.parameters['ndirs']] + np.pi
         cur_k0_angle = -(cur_k0_angle - np.pi/2)
-        for nd in range(self.pParam['ndirs']):
-            if np.abs(cur_k0_angle[nd] - self.pParam.k0angle_g[nd]) > 0.05:
-                cur_k0_angle[nd] = self.pParam.k0angle_g[nd]
+        for nd in range(self.parameters['ndirs']):
+            if np.abs(cur_k0_angle[nd] - self.parameters.k0angle_g[nd]) > 0.05:
+                cur_k0_angle[nd] = self.parameters.k0angle_g[nd]
         cur_k0 = np.sqrt(np.sum(np.square(cur_k0), 1))
-        given_k0 = 1 / self.pParam['space']
+        given_k0 = 1 / self.parameters['space']
         cur_k0[np.abs(cur_k0 - given_k0) > 0.1] = given_k0
     
         return cur_k0, cur_k0_angle, modamp
