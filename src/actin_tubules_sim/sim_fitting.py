@@ -18,33 +18,36 @@ def make_matrix(nphases, norders):
 
 
 
-def apodize(napodize,  image):
-    
+def apodize(napodize, image):
     # Initialize apoimage as a copy of the input image
     apoimage = image.copy()
+    
     if napodize > 0:
         # Apodization factor calculation
         l = np.arange(napodize)
         fact = 1 - np.sin((l + 0.5) / napodize * np.pi / 2)
         
         # Apply vertical apodization
-        imageUp = image[:napodize, :]
-        imageDown = image[-napodize:, :]
-        diff = (imageDown[::-1, :] - imageUp) / 2
-        factor = diff * fact[:, None]
-        apoimage[:napodize, :] = imageUp + factor
-        apoimage[-napodize:, :] = imageDown - factor[::-1, :]
+        imageUp = image[:napodize, :, :]
+        imageDown = image[-napodize:, :, :]
+        diff = (imageDown[::-1, :, :] - imageUp) / 2
+        factor = diff * fact[:, None, None]
+        apoimage[:napodize, :, :] = imageUp + factor
+        apoimage[-napodize:, :, :] = imageDown - factor[::-1, :, :]
 
         # Apply horizontal apodization
-        imageLeft = apoimage[:, :napodize]
-        imageRight = apoimage[:, -napodize:]
-        diff = (imageRight[:, ::-1] - imageLeft) / 2
-        factor = diff * fact[None, :]
-        apoimage[:, :napodize] = imageLeft + factor
-        apoimage[:, -napodize:] = imageRight - factor[:, ::-1]
+        imageLeft = apoimage[:, :napodize, :]
+        imageRight = apoimage[:, -napodize:, :]
+        diff = (imageRight[:, ::-1, :] - imageLeft) / 2
+        factor = diff * fact[None, :, None]
+        apoimage[:, :napodize, :] = imageLeft + factor
+        apoimage[:, -napodize:, :] = imageRight - factor[:, ::-1, :]
 
     return apoimage
-    
+
+
+
+
 def makeoverlaps(bands, Nx, Ny, order1, order2, k0x, k0y, dxy, dz, OTF, lamda):
     otfcutoff = 0.005
     kx = k0x * (order2 - order1)
@@ -55,8 +58,8 @@ def makeoverlaps(bands, Nx, Ny, order1, order2, k0x, k0y, dxy, dz, OTF, lamda):
     dkr = min(dkx, dky)
     rdistcutoff = min(1.35 * 2 / lamda, Nx / 2 * dkx, Ny / 2 * dky)
 
-    x1 = np.linspace(-Nx / 2, Nx / 2, Nx) * dkx
-    y1 = np.linspace(-Ny / 2, Ny / 2, Ny) * dky
+    x1 = np.linspace(-Nx / 2, Nx / 2 - 1, Nx) * dkx
+    y1 = np.linspace(-Ny / 2, Ny / 2 - 1, Ny) * dky
 
     X1, Y1 = np.meshgrid(x1, y1)
     rdist1 = np.sqrt(X1**2 + Y1**2)
@@ -80,13 +83,15 @@ def makeoverlaps(bands, Nx, Ny, order1, order2, k0x, k0y, dxy, dz, OTF, lamda):
     band2re = bands[order2 * 2 - 1]
     band2im = bands[order2 * 2]
 
-    x = np.arange(0, len(OTF) * dkr, dkr)
-    interp = interp1d(x, OTF, kind='linear', bounds_error=False, fill_value=0)
-    OTF1 = interp(rdist1)
-    OTF2 = interp(rdist1)
-    OTF1_sk0 = interp(rdist21)
-    OTF2_sk0 = interp(rdist12)
-    
+    # Ensure OTF interpolation is correctly shaped
+    rdist_flat = rdist1.flatten()
+    OTF_flat = OTF.flatten()
+    interp = interp1d(np.arange(OTF.size), OTF_flat, kind='linear', bounds_error=False, fill_value=0)
+    OTF1 = interp(rdist_flat).reshape((Ny, Nx))
+    OTF2 = interp(rdist_flat).reshape((Ny, Nx))
+    OTF1_sk0 = interp(rdist21.flatten()).reshape((Ny, Nx))
+    OTF2_sk0 = interp(rdist12.flatten()).reshape((Ny, Nx))
+
     OTF1_mag = np.abs(OTF1)
     OTF2_mag = np.abs(OTF2)
     OTF1_sk0_mag = np.abs(OTF1_sk0)
@@ -94,7 +99,7 @@ def makeoverlaps(bands, Nx, Ny, order1, order2, k0x, k0y, dxy, dz, OTF, lamda):
 
     mask1 = mask1 & (OTF1_mag > otfcutoff) & (OTF2_sk0_mag > otfcutoff)
     mask2 = mask2 & (OTF1_sk0_mag > otfcutoff) & (OTF2_mag > otfcutoff)
-    
+
     root1 = np.sqrt(OTF1_mag**2 + OTF2_sk0_mag**2)
     root2 = np.sqrt(OTF1_sk0_mag**2 + OTF2_mag**2)
 
@@ -169,7 +174,7 @@ def fitxyparabola(x1, y1, x2, y2, x3, y3):
 
     return peak
 
-def fitk0andmodamps(bands, overlap0, overlap1, Nx, Ny, Nz, k0, dxy, dz, OTF, lamda, pParam):
+def fitk0andmodamps(bands, overlap0, overlap1, Nx, Ny, Nz, k0, dxy, dz, OTF, lamda, parameters):
     # Find optimal k0 and modammps
     deltaangle = 0.001
     
@@ -186,10 +191,10 @@ def fitk0andmodamps(bands, overlap0, overlap1, Nx, Ny, Nz, k0, dxy, dz, OTF, lam
     k0mag = np.sqrt(k0[0]**2 + k0[1]**2)
     k0angle = np.arctan2(k0[1], k0[0])
 
-    redoarrays = pParam.recalcarrays >= 1
+    redoarrays = parameters["recalcarrays"] >= 1
 
     def get_modamp_wrapper(angle, mag):
-        return np.abs(getmodamp(angle, mag, bands, overlap0, overlap1, Nx, Ny, Nz, fitorder1, fitorder2, dxy, dz, OTF, lamda, redoarrays, pParam))
+        return np.abs(getmodamp(angle, mag, bands, overlap0, overlap1, Nx, Ny, fitorder1, fitorder2, dxy, dz, OTF, lamda, redoarrays, parameters))
 
     # Search for optimal k0 angle
     x1 = k0angle
@@ -251,13 +256,13 @@ def fitk0andmodamps(bands, overlap0, overlap1, Nx, Ny, Nz, k0, dxy, dz, OTF, lam
     
     mag = fitxyparabola(x1, amp1, k0mag, amp2, x2, amp2)
 
-    if pParam.ifshowmodamp == 1:
+    if parameters['ifshowmodamp'] == 1:
         print('Optimum modulation amplitude:\n')
 
-    redoarrays = pParam.recalcarrays >= 2
-    modamp = getmodamp(angle, mag, bands, overlap0, overlap1, Nx, Ny,  fitorder1, fitorder2, dxy, dz, OTF, lamda, redoarrays, pParam)
+    redoarrays = parameters['recalcarrays'] >= 2
+    modamp = getmodamp(angle, mag, bands, overlap0, overlap1, Nx, Ny,  fitorder1, fitorder2, dxy, dz, OTF, lamda, redoarrays, parameters)
 
-    if pParam.ifshowmodamp == 1:
+    if parameters['ifshowmodamp'] == 1:
         print('Optimum k0 angle=%f rad, length=%f 1/microns, spacing=%f microns\n'% (angle, mag, 1.0 / mag))
 
     new_k0 = [mag * np.cos(angle), mag * np.sin(angle)]
@@ -265,7 +270,7 @@ def fitk0andmodamps(bands, overlap0, overlap1, Nx, Ny, Nz, k0, dxy, dz, OTF, lam
     return new_k0, amps
 
 
-def getmodamp(k0angle, k0length, bands, overlap0, overlap1, Nx, Ny, order1, order2, dxy, dz, OTF, lamda, redoarrays, pParam):
+def getmodamp(k0angle, k0length, bands, overlap0, overlap1, Nx, Ny, order1, order2, dxy, dz, OTF, lamda, redoarrays, parameters):
     k1 = np.array([k0length * np.cos(k0angle), k0length * np.sin(k0angle)])
 
     if redoarrays > 0:
@@ -289,31 +294,33 @@ def getmodamp(k0angle, k0length, bands, overlap0, overlap1, Nx, Ny, order1, orde
 
     modamp = sumXstarY / sumXmag
     
-    if pParam.ifshowmodamp == 1:
+    if parameters['ifshowmodamp'] == 1:
         print('In getmodamp: angle=%f, mag=%f 1/micron, amp=%f, phase=%f' % (k0angle, k0length, np.abs(modamp), np.angle(modamp)))
     
     return modamp
 
 
 
-def cal_modamp(image, OTF, pParam):
+def cal_modamp(image, OTF, parameters):
     # Parameters initialization
-    Nx, Ny = pParam['Nx'], pParam['Ny']
-    lamda = pParam['wavelength']
-    dxy = pParam['dxy']
-    ndirs, nphases = pParam['ndirs'], pParam['nphases']
-    norders, napodize = pParam['norders'], pParam['napodize']
-    k0mod, k0angle = pParam['k0mod'], pParam['k0angle_c']
+    Nx, Ny = parameters['Nx'], parameters['Ny']
+    lamda = parameters['wavelength']
+    dxy = parameters['dxy']
+    ndirs, nphases = parameters['ndirs'], parameters['nphases']
+    norders, napodize = parameters['norders'], parameters['napodize']
+    k0mod, k0angle = parameters['k0mod'], parameters['k0angle_c']
     k0 = np.transpose([k0mod * np.cos(k0angle), k0mod * np.sin(k0angle)])
-
+    print(image.shape)
     # Calculate modamp
     image = np.reshape(image, [Ny, Nx, ndirs, nphases])
+    print(image.shape, [Ny, Nx, ndirs, nphases])
     modamp = []
     cur_k0 = np.copy(k0)
     for d in range(ndirs):
         sepMatrix = make_matrix(nphases, norders)
         imagePro = np.squeeze(image[:, :, d, :])
         imagePro = np.transpose(imagePro, (1, 0, 2))
+        print(imagePro.shape)
         Fimagepro = np.fft.fftshift(np.fft.fft2(apodize(napodize, imagePro)))
 
         bandsDir = np.dot(sepMatrix, Fimagepro.reshape((nphases, Ny * Nx)))
@@ -322,7 +329,7 @@ def cal_modamp(image, OTF, pParam):
         fitorder0 = 0
         fitorder1 = 1
         overlap0, overlap1 = makeoverlaps(bandsDir, Ny, Nx, fitorder0, fitorder1, k0[d, 0], k0[d, 1], dxy, 0, OTF, lamda)
-        new_k0, cur_modamp = fitk0andmodamps(bandsDir, overlap0, overlap1, Ny, Nx, 1, k0[d, :], dxy, 0, OTF, lamda, pParam)
+        new_k0, cur_modamp = fitk0andmodamps(bandsDir, overlap0, overlap1, Ny, Nx, 1, k0[d, :], dxy, 0, OTF, lamda, parameters)
         cur_k0[d, :] = new_k0
 
         modamp.append(cur_modamp)

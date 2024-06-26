@@ -18,7 +18,7 @@ from tensorflow.keras.layers import (
     multiply,
 )
 from tensorflow.keras.models import Model
-from .sim_fitting import cal_modamp
+from .sim_fitting import cal_modamp, create_psf
 
 class NoiseSuppressionModule(Layer):
 
@@ -424,13 +424,13 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
 
 
 class Train_RDL_Denoising(tf.keras.Model):
-    def __init__(self, srmodel, denmodel, loss_fn, optimizer, OTF, parameters):
+    def __init__(self, srmodel, denmodel, loss_fn, optimizer,  parameters, PSF = None):
         super(Train_RDL_Denoising, self).__init__()
         self.srmodel = srmodel
         self.denmodel = denmodel
         self.loss_fn = loss_fn
         self.optimizer = optimizer
-        self.OTF = OTF
+        self.PSF = PSF
         self.parameters = parameters 
         self.nphases = self.parameters['nphases']
         self.ndirs = self.parameters['ndirs']
@@ -440,12 +440,31 @@ class Train_RDL_Denoising(tf.keras.Model):
         self.phase_space = 2 * np.pi / self.nphases
         self.scale = self.parameters['scale']
         self.dxy = self.parameters['dxy']
-        [self.Nx_hr, self.Ny_hr] = [self.Nx, self.Ny] * self.scale
+        self.sigma_x = self.parameters['sigma_x']
+        self.sigma_y = self.parameters['sigma_y']
+        self.dxy = self.parameters['dxy']
+        [self.Nx_hr, self.Ny_hr] = [self.Nx* self.scale, self.Ny* self.scale] 
         [self.dx_hr, self.dy_hr] = [x / self.scale for x in [self.dxy, self.dxy]]
 
         xx = self.dx_hr * np.arange(-self.Nx_hr / 2, self.Nx_hr / 2, 1)
         yy = self.dy_hr * np.arange(-self.Ny_hr / 2, self.Ny_hr / 2, 1)
         [self.X, self.Y] = np.meshgrid(xx, yy)
+        
+        self.dkx = 1.0 / ( self.Nx *  self.dxy)
+        self.dky = 1.0 / ( self.Ny * self.dxy)
+        
+        if self.PSF is None:
+            
+            self.PSF, self.OTF = create_psf(self.sigma_x, 
+                        self.sigma_x,
+                        self.Nx, 
+                        self.Ny, 
+                        self.dkx, 
+                        self.dky)
+        else:
+            self.PSF /= np.sum(self.PSF)  
+            self.OTF = abs(F.ifftshift(F.ifft2(self.PSF)))
+            self.OTF /= np.sum(self.OTF)
 
     
     
@@ -477,50 +496,57 @@ class Train_RDL_Denoising(tf.keras.Model):
                     np.exp(1j * (kxR_grid * X_grid + kyR_grid * Y_grid))
 
         pattern = np.square(np.abs(interBeam))
-
+        print('SR', img_SR.shape)
+        print('pattern', pattern.shape)
         # FFT and modulation
         patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR[np.newaxis, np.newaxis, :, :]), axes=(-2, -1)) * self.OTF[np.newaxis, np.newaxis, :, :]
         modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft, axes=(-2, -1)), axes=(-2, -1)))
 
         # Resize images
+        print('modulated', modulated_img.shape)
         modulated_img_resized = tf.image.resize(modulated_img, [self.Ny, self.Nx])
         img_gen = tf.reshape(modulated_img_resized, [self.ndirs, self.nphases, self.Ny, self.Nx])
-        
+        print('image_gen', img_gen.shape)
         return img_gen 
     
     
     def _get_cur_k(self, image_gt):
         
-        cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float), self.OTF, self.parameters)
+        cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float32), self.OTF, self.parameters)
         cur_k0_angle = np.array(np.arctan(cur_k0[:, 1] / cur_k0[:, 0]))
         cur_k0_angle[1:self.parameters['ndirs']] = cur_k0_angle[1:self.parameters['ndirs']] + np.pi
         cur_k0_angle = -(cur_k0_angle - np.pi/2)
         for nd in range(self.parameters['ndirs']):
-            if np.abs(cur_k0_angle[nd] - self.parameters.k0angle_g[nd]) > 0.05:
-                cur_k0_angle[nd] = self.parameters.k0angle_g[nd]
+            if np.abs(cur_k0_angle[nd] - self.parameters['k0angle_g'][nd]) > 0.05:
+                cur_k0_angle[nd] = self.parameters['k0angle_g'][nd]
         cur_k0 = np.sqrt(np.sum(np.square(cur_k0), 1))
         given_k0 = 1 / self.parameters['space']
         cur_k0[np.abs(cur_k0 - given_k0) > 0.1] = given_k0
     
         return cur_k0, cur_k0_angle, modamp
     
-    def _intensity_equilization(self,img_in, image_gt):
+    def _intensity_equilization(self, img_in, image_gt):
+        # Compute the mean for the first nphases slice of img_in and image_gt
+        mean_th_in = tf.reduce_mean(img_in[:self.nphases])
+        mean_th_gt = tf.reduce_mean(image_gt[:self.nphases])
         
-        mean_th_in = np.mean(img_in[:self.nphases, :, :])
-        for d in range(1, self.ndirs):
-                data_d = img_in[d * self.nphases:(d + 1) * self.nphases, :, :]
-                img_in[d * self.nphases:(d + 1) * self.nphases, :, :] = data_d * mean_th_in / np.mean(data_d)
-        mean_th_gt = np.mean(image_gt[:self.nphases, :, :])
-        for d in range(self.ndirs):
-            data_d = image_gt[d * self.nphases:(d + 1) * self.nphases, :, :]
-            image_gt[d * self.nphases:(d + 1) * self.nphases, :, :] = data_d * mean_th_gt / np.mean(data_d)
+        # Reshape img_in to compute the mean for each direction
+        img_in_reshaped = tf.reshape(img_in, (self.ndirs, self.nphases, img_in.shape[1], img_in.shape[2]))
+        data_in_means = tf.reduce_mean(img_in_reshaped, axis=[1, 2, 3], keepdims=True)
+        normalized_img_in = img_in * mean_th_in / tf.repeat(data_in_means, repeats=self.nphases, axis=0)
         
-        return img_in, image_gt
-    
+        # Reshape image_gt to compute the mean for each direction
+        image_gt_reshaped = tf.reshape(image_gt, (self.ndirs, self.nphases, image_gt.shape[1], image_gt.shape[2]))
+        data_gt_means = tf.reduce_mean(image_gt_reshaped, axis=[1, 2, 3], keepdims=True)
+        normalized_image_gt = image_gt * mean_th_gt / tf.repeat(data_gt_means, repeats=self.nphases, axis=0)
+        
+        return normalized_img_in, normalized_image_gt
+        
     
     def fit(self, data):
         x, y = data
         
+        print(x.shape, y.shape)
         input_height = x.shape[1]
         input_width = x.shape[2]
         batch_size = x.shape[0]
@@ -539,17 +565,17 @@ class Train_RDL_Denoising(tf.keras.Model):
             
             img_in, image_gt = self._intensity_equilization(img_in, image_gt)
             image_gen = self._phase_computation(img_SR, modamp, cur_k0_angle, cur_k0)
-            
+            print(img_in.shape, img_SR.shape, image_gt.shape, image_gen.shape)
             # Train denoising
-            with tf.GradientTape() as tape:
-                y_pred = self.denmodel(img_in, training=True) 
-                loss = self.loss_fn(y[i:i+1], y_pred)  
+            #with tf.GradientTape() as tape:
+            #    y_pred = self.denmodel(img_in, training=True) 
+            #    loss = self.loss_fn(y[i:i+1], y_pred)  
 
-            trainable_vars = self.denmodel.trainable_variables
-            gradients = tape.gradient(loss, trainable_vars)
+            #trainable_vars = self.denmodel.trainable_variables
+            #gradients = tape.gradient(loss, trainable_vars)
 
-            self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+            #self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-            self.compiled_metrics.update_state(y[i:i+1], y_pred)
+            #self.compiled_metrics.update_state(y[i:i+1], y_pred)
 
-        return {m.name: m.result() for m in self.metrics}
+        #return {m.name: m.result() for m in self.metrics}
