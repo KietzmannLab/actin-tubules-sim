@@ -3,7 +3,6 @@
 [![License BSD-3](https://img.shields.io/pypi/l/actin-tubules-sim.svg?color=green)](https://github.com/Kapoorlabs-CAPED/actin-tubules-sim/raw/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/actin-tubules-sim.svg?color=green)](https://pypi.org/project/actin-tubules-sim)
 [![Python Version](https://img.shields.io/pypi/pyversions/actin-tubules-sim.svg?color=green)](https://python.org)
-[![tests](https://github.com/Kapoorlabs-CAPED/actin-tubules-sim/workflows/tests/badge.svg)](https://github.com/Kapoorlabs-CAPED/actin-tubules-sim/actions)
 [![codecov](https://codecov.io/gh/Kapoorlabs-CAPED/actin-tubules-sim/branch/main/graph/badge.svg)](https://codecov.io/gh/Kapoorlabs-CAPED/actin-tubules-sim)
 
 
