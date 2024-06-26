@@ -518,7 +518,7 @@ class Train_RDL_Denoising(tf.keras.Model):
         return img_in, image_gt
     
     
-    def train_step(self, data):
+    def fit(self, data):
         x, y = data
         
         input_height = x.shape[1]
