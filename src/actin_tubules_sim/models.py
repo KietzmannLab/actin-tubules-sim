@@ -179,7 +179,6 @@ def ResidualGroup(input, channel):
 
 def DFCAN(input_shape, scale=2):
     inputs = Input(input_shape)
-    print(inputs.shape)
     conv = Conv2D(64, kernel_size=3, padding="same")(inputs)
     conv = Lambda(gelu)(conv)
     n_ResGroup = 4
@@ -201,7 +200,6 @@ def gelu(x):
 
 
 def pixelshuffle(layer_in, scale):
-    print(f"{layer_in},{scale}")
     return tf.nn.depth_to_space(
         layer_in, block_size=scale
     )  # here I changes :  block_size=scale :  to :  block_size=2*scale  :
@@ -546,7 +544,6 @@ class Train_RDL_Denoising(tf.keras.Model):
     def fit(self, data):
         x, y = data
         
-        print(x.shape, y.shape)
         input_height = x.shape[1]
         input_width = x.shape[2]
         batch_size = x.shape[0]
