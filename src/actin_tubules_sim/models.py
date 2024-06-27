@@ -457,8 +457,8 @@ class Train_RDL_Denoising(tf.keras.Model):
             
             self.PSF, self.OTF = create_psf(self.sigma_x, 
                         self.sigma_x,
-                        self.Nx, 
-                        self.Ny, 
+                        self.Nx_hr, 
+                        self.Ny_hr, 
                         self.dkx, 
                         self.dky)
         else:
@@ -496,7 +496,6 @@ class Train_RDL_Denoising(tf.keras.Model):
     def _get_cur_k(self, image_gt):
         
         cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float32), self.OTF, self.parameters)
-        print('modamp', len(modamp))
         cur_k0_angle = np.array(np.arctan(cur_k0[:, 1] / cur_k0[:, 0]))
         cur_k0_angle[1:self.parameters['ndirs']] = cur_k0_angle[1:self.parameters['ndirs']] + np.pi
         cur_k0_angle = -(cur_k0_angle - np.pi/2)
@@ -543,7 +542,6 @@ class Train_RDL_Denoising(tf.keras.Model):
             img_in = x[i:i+1]  # Extract the i-th example from the batch
             img_SR = sr_y_predict[i:i+1]  # Extract the corresponding SR output
             image_gt = y[i:i+1]
-            print('SR',img_in.shape, img_SR.shape)
             cur_k0, cur_k0_angle, modamp = self._get_cur_k(image_gt=image_gt)
             
             img_in, image_gt = self._intensity_equilization(img_in, image_gt)
