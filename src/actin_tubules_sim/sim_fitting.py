@@ -310,17 +310,14 @@ def cal_modamp(image, OTF, parameters):
     norders, napodize = parameters['norders'], parameters['napodize']
     k0mod, k0angle = parameters['k0mod'], parameters['k0angle_c']
     k0 = np.transpose([k0mod * np.cos(k0angle), k0mod * np.sin(k0angle)])
-    print(image.shape)
     # Calculate modamp
     image = np.reshape(image, [Ny, Nx, ndirs, nphases])
-    print(image.shape, [Ny, Nx, ndirs, nphases])
     modamp = []
     cur_k0 = np.copy(k0)
     for d in range(ndirs):
         sepMatrix = make_matrix(nphases, norders)
         imagePro = np.squeeze(image[:, :, d, :])
         imagePro = np.transpose(imagePro, (1, 0, 2))
-        print(imagePro.shape)
         Fimagepro = np.fft.fftshift(np.fft.fft2(apodize(napodize, imagePro)))
 
         bandsDir = np.dot(sepMatrix, Fimagepro.reshape((nphases, Ny * Nx)))

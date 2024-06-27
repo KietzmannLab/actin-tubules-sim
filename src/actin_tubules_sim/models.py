@@ -20,7 +20,8 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 from .sim_fitting import cal_modamp, create_psf
 import cv2 
-
+from tqdm import tqdm
+from csbdeep.utils import normalize
 
 class NoiseSuppressionModule(Layer):
 
@@ -481,13 +482,13 @@ class Train_RDL_Denoising(tf.keras.Model):
                     kyR = -cur_k0[d] * np.pi * np.sin(alpha)
                     phOffset = phase_list[d] + i * self.phase_space
                     interBeam = np.exp(1j * (kxL * self.X + kyL * self.Y + phOffset)) + np.exp(1j * (kxR * self.X + kyR * self.Y))
-                    pattern = np.square(np.abs(interBeam))
+                    pattern = normalize(np.square(np.abs(interBeam)))
                     patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR)) * self.OTF
                     modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft)))
                     modulated_img = cv2.resize(modulated_img, (self.Ny, self.Nx))    
                     img_gen.append(modulated_img)
             
-            img_gen = np.asarray(img_gen)
+            img_gen = normalize(np.asarray(img_gen))
             
             
             return img_gen
@@ -508,23 +509,7 @@ class Train_RDL_Denoising(tf.keras.Model):
     
         return cur_k0, cur_k0_angle, modamp
     
-    def _intensity_equilization(self, img_in, image_gt):
-        # Compute the mean for the first nphases slice of img_in and image_gt
-        mean_th_in = tf.reduce_mean(img_in[:self.nphases])
-        mean_th_gt = tf.reduce_mean(image_gt[:self.nphases])
-        
-        # Reshape img_in to compute the mean for each direction
-        img_in_reshaped = tf.reshape(img_in, (self.ndirs, self.nphases, img_in.shape[1], img_in.shape[2]))
-        data_in_means = tf.reduce_mean(img_in_reshaped, axis=[1, 2, 3], keepdims=True)
-        normalized_img_in = img_in * mean_th_in / tf.repeat(data_in_means, repeats=self.nphases, axis=0)
-        
-        # Reshape image_gt to compute the mean for each direction
-        image_gt_reshaped = tf.reshape(image_gt, (self.ndirs, self.nphases, image_gt.shape[1], image_gt.shape[2]))
-        data_gt_means = tf.reduce_mean(image_gt_reshaped, axis=[1, 2, 3], keepdims=True)
-        normalized_image_gt = image_gt * mean_th_gt / tf.repeat(data_gt_means, repeats=self.nphases, axis=0)
-        
-        return normalized_img_in, normalized_image_gt
-        
+
     
     def fit(self, data, data_val):
         x, y = data
@@ -537,16 +522,16 @@ class Train_RDL_Denoising(tf.keras.Model):
         sr_y_predict = self.srmodel.predict(x)
         sr_y_predict = tf.squeeze(sr_y_predict, axis=-1) # Batch, Ny, Nx, 1 
         # Loop over each example in the batch
-        for i in range(batch_size):
+        for i in tqdm(range(batch_size)):
             # Get the current example
             img_in = x[i:i+1]  # Extract the i-th example from the batch
             img_SR = sr_y_predict[i:i+1]  # Extract the corresponding SR output
             image_gt = y[i:i+1]
             cur_k0, cur_k0_angle, modamp = self._get_cur_k(image_gt=image_gt)
             
-            img_in, image_gt = self._intensity_equilization(img_in, image_gt)
             image_gen = self._phase_computation(img_SR, modamp, cur_k0_angle, cur_k0)
-            print(img_in.shape, img_SR.shape, image_gt.shape, image_gen.shape)
+            if i == 0:
+              print(i, img_in.shape, img_SR.shape, image_gt.shape, image_gen.shape)
             # Train denoising
             #with tf.GradientTape() as tape:
             #    y_pred = self.denmodel(img_in, training=True) 
