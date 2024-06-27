@@ -19,6 +19,8 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from .sim_fitting import cal_modamp, create_psf
+import cv2 
+
 
 class NoiseSuppressionModule(Layer):
 
@@ -467,50 +469,34 @@ class Train_RDL_Denoising(tf.keras.Model):
     
     
     def _phase_computation(self, img_SR, modamp, cur_k0_angle, cur_k0):
-        
-        phase_list = -np.angle(modamp)
 
-        # Create meshgrid of indices for phases
-        phases = np.arange(self.nphases)
-        
-        # Vectorized calculations for kxL, kyL, kxR, kyR
-        alphas = cur_k0_angle[:, np.newaxis]
-        kxL = cur_k0[:, np.newaxis] * np.pi * np.cos(alphas)
-        kyL = cur_k0[:, np.newaxis] * np.pi * np.sin(alphas)
-        kxR = -kxL
-        kyR = -kyL
-
-        # Vectorized phase offsets
-        phOffsets = phase_list[:, np.newaxis] + phases * self.phase_space
-       
-        # Vectorized calculations for interBeam
-        kxL_grid, X_grid = np.meshgrid(kxL, self.X, indexing='ij')
-        kyL_grid, Y_grid = np.meshgrid(kyL, self.Y, indexing='ij')
-        kxR_grid, _ = np.meshgrid(kxR, self.X, indexing='ij')
-        kyR_grid, _ = np.meshgrid(kyR, self.Y, indexing='ij')
-
-        # Creating interBeam patterns
-        interBeam = np.exp(1j * (kxL_grid * X_grid + kyL_grid * Y_grid + phOffsets[:, :, np.newaxis, np.newaxis])) + \
-                    np.exp(1j * (kxR_grid * X_grid + kyR_grid * Y_grid))
-
-        pattern = np.square(np.abs(interBeam))
-        print('SR', img_SR.shape)
-        print('pattern', pattern.shape)
-        # FFT and modulation
-        patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR[np.newaxis, np.newaxis, :, :]), axes=(-2, -1)) * self.OTF[np.newaxis, np.newaxis, :, :]
-        modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft, axes=(-2, -1)), axes=(-2, -1)))
-
-        # Resize images
-        print('modulated', modulated_img.shape)
-        modulated_img_resized = tf.image.resize(modulated_img, [self.Ny, self.Nx])
-        img_gen = tf.reshape(modulated_img_resized, [self.ndirs, self.nphases, self.Ny, self.Nx])
-        print('image_gen', img_gen.shape)
-        return img_gen 
+            phase_list = -np.angle(modamp)
+            img_gen = []
+            for d in range(self.ndirs):
+                alpha = cur_k0_angle[d]
+                for i in range(self.nphases):
+                    kxL = cur_k0[d] * np.pi * np.cos(alpha)
+                    kyL = cur_k0[d] * np.pi * np.sin(alpha)
+                    kxR = -cur_k0[d] * np.pi * np.cos(alpha)
+                    kyR = -cur_k0[d] * np.pi * np.sin(alpha)
+                    phOffset = phase_list[d] + i * self.phase_space
+                    interBeam = np.exp(1j * (kxL * self.X + kyL * self.Y + phOffset)) + np.exp(1j * (kxR * self.X + kyR * self.Y))
+                    pattern = np.square(np.abs(interBeam))
+                    patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR)) * self.OTF
+                    modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft)))
+                    modulated_img = cv2.resize(modulated_img, (self.Ny, self.Nx))    
+                    img_gen.append(modulated_img)
+            
+            img_gen = np.asarray(img_gen)
+            
+            
+            return img_gen
     
     
     def _get_cur_k(self, image_gt):
         
         cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float32), self.OTF, self.parameters)
+        print('modamp', len(modamp))
         cur_k0_angle = np.array(np.arctan(cur_k0[:, 1] / cur_k0[:, 0]))
         cur_k0_angle[1:self.parameters['ndirs']] = cur_k0_angle[1:self.parameters['ndirs']] + np.pi
         cur_k0_angle = -(cur_k0_angle - np.pi/2)
@@ -541,9 +527,9 @@ class Train_RDL_Denoising(tf.keras.Model):
         return normalized_img_in, normalized_image_gt
         
     
-    def fit(self, data):
+    def fit(self, data, data_val):
         x, y = data
-        
+        x_val, y_val = data_val
         input_height = x.shape[1]
         input_width = x.shape[2]
         batch_size = x.shape[0]
@@ -557,7 +543,7 @@ class Train_RDL_Denoising(tf.keras.Model):
             img_in = x[i:i+1]  # Extract the i-th example from the batch
             img_SR = sr_y_predict[i:i+1]  # Extract the corresponding SR output
             image_gt = y[i:i+1]
-            
+            print('SR',img_in.shape, img_SR.shape)
             cur_k0, cur_k0_angle, modamp = self._get_cur_k(image_gt=image_gt)
             
             img_in, image_gt = self._intensity_equilization(img_in, image_gt)
