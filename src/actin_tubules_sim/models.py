@@ -450,6 +450,7 @@ class Train_RDL_Denoising(tf.keras.Model):
         self.sr_model_dir = self.parameters['sr_model_dir']
         self.den_model_dir = self.parameters['den_model_dir']
         self.log_dir = self.parameters['log_dir']
+        self.batch_size = self.parameters['batch_size']
         [self.Nx_hr, self.Ny_hr] = [self.Nx* self.scale, self.Ny* self.scale] 
         [self.dx_hr, self.dy_hr] = [x / self.scale for x in [self.dxy, self.dxy]]
 
@@ -522,7 +523,6 @@ class Train_RDL_Denoising(tf.keras.Model):
         x_val, y_val = data_val
         input_height = x.shape[1]
         input_width = x.shape[2]
-        batch_size = x.shape[0]
         channels = x.shape[-1]
         tensorboard_callback = callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         lrate = callbacks.ReduceLROnPlateau(monitor='loss', factor=0.1, patience=4, verbose=1)
@@ -537,7 +537,11 @@ class Train_RDL_Denoising(tf.keras.Model):
         sr_y_predict = self.srmodel.predict(x)
         sr_y_predict = tf.squeeze(sr_y_predict, axis=-1) # Batch, Ny, Nx, 1 
         # Loop over each example in the batch
-        for i in range(batch_size):
+        
+        list_image_gen = []
+        list_image_in = []
+        list_image_gt = []
+        for i in range(x.shape[0]):
             # Get the current example
             img_in = x[i:i+1][0]  # Extract the i-th example from the batch
             img_SR = sr_y_predict[i:i+1][0]   # Extract the corresponding SR output
@@ -546,22 +550,28 @@ class Train_RDL_Denoising(tf.keras.Model):
             
             image_gen = self._phase_computation(img_SR, modamp, cur_k0_angle, cur_k0)
             image_gen = np.transpose(image_gen, (1, 2, 0))
-           
-            input_MPE_batch = []
-            input_PFE_batch = []
-            gt_batch = []
-            for i in range(self.ndirs):
-                input_MPE_batch.append(image_gen[:, :, i * self.nphases:(i + 1) * self.nphases])
-                input_PFE_batch.append(img_in[:, :, i * self.nphases:(i + 1) * self.nphases])
-                gt_batch.append(image_gt[:, :, i * self.nphases:(i + 1) * self.nphases])
-            input_MPE_batch = np.array(input_MPE_batch)
-            input_PFE_batch = np.array(input_PFE_batch)
-            print(input_MPE_batch.shape, input_PFE_batch.shape)
-            gt_batch = np.array(gt_batch)
-            
-            
-            self.denmodel.fit([input_MPE_batch, input_PFE_batch], gt_batch, batch_size=batch_size,
-                               epochs=self.epochs, shuffle=True,
-                               callbacks=[lrate, hrate, srate, tensorboard_callback])
-            
-            self.denmodel.save(self.den_model_dir)
+            list_image_gen.append(image_gen)
+            list_image_in.append(img_in)
+            list_image_gt.append(image_gt)
+        
+        list_image_gen = np.asarray(list_image_gen)
+        list_image_in = np.asarray(list_image_in)
+        list_image_gt = np.asarray(list_image_gt)     
+        input_MPE_batch = []
+        input_PFE_batch = []
+        gt_batch = []
+        for i in range(self.ndirs):
+            input_MPE_batch.append(list_image_gen[:, :, i * self.nphases:(i + 1) * self.nphases])
+            input_PFE_batch.append(list_image_in[:, :, i * self.nphases:(i + 1) * self.nphases])
+            gt_batch.append(list_image_gt[:, :, i * self.nphases:(i + 1) * self.nphases])
+        input_MPE_batch = np.array(input_MPE_batch)
+        input_PFE_batch = np.array(input_PFE_batch)
+        print(input_MPE_batch.shape, input_PFE_batch.shape, list_image_gen.shape, list_image_gt.shape, list_image_in.shape)
+        gt_batch = np.array(gt_batch)
+        
+        
+        self.denmodel.fit([input_MPE_batch, input_PFE_batch], gt_batch, batch_size=self.batch_size,
+                            epochs=self.epochs, shuffle=True,
+                            callbacks=[lrate, hrate, srate, tensorboard_callback])
+        
+        self.denmodel.save(self.den_model_dir)
