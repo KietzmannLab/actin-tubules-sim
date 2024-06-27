@@ -542,9 +542,8 @@ class Train_RDL_Denoising(tf.keras.Model):
         list_image_in = []
         list_image_gt = []
         for i in range(x.shape[0]):
-            # Get the current example
-            img_in = x[i:i+1][0]  # Extract the i-th example from the batch
-            img_SR = sr_y_predict[i:i+1][0]   # Extract the corresponding SR output
+            img_in = x[i:i+1][0]  
+            img_SR = sr_y_predict[i:i+1][0]   
             image_gt = y[i:i+1][0] 
             cur_k0, cur_k0_angle, modamp = self._get_cur_k(image_gt=image_gt)
             
