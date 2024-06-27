@@ -22,6 +22,8 @@ from .sim_fitting import cal_modamp, create_psf
 import cv2 
 from tqdm import tqdm
 from csbdeep.utils import normalize
+from tensorflow.keras import callbacks
+
 
 class NoiseSuppressionModule(Layer):
 
@@ -426,13 +428,14 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
 
 class Train_RDL_Denoising(tf.keras.Model):
     def __init__(self, srmodel, denmodel, loss_fn, optimizer,  parameters, PSF = None):
-        super(Train_RDL_Denoising, self).__init__()
+        super().__init__()
         self.srmodel = srmodel
         self.denmodel = denmodel
         self.loss_fn = loss_fn
         self.optimizer = optimizer
         self.PSF = PSF
         self.parameters = parameters 
+        self.epochs = self.parameters['epochs']
         self.nphases = self.parameters['nphases']
         self.ndirs = self.parameters['ndirs']
         self.space = self.parameters['space']
@@ -444,6 +447,9 @@ class Train_RDL_Denoising(tf.keras.Model):
         self.sigma_x = self.parameters['sigma_x']
         self.sigma_y = self.parameters['sigma_y']
         self.dxy = self.parameters['dxy']
+        self.sr_model_dir = self.parameters['sr_model_dir']
+        self.den_model_dir = self.parameters['den_model_dir']
+        self.log_dir = self.parameters['log_dir']
         [self.Nx_hr, self.Ny_hr] = [self.Nx* self.scale, self.Ny* self.scale] 
         [self.dx_hr, self.dy_hr] = [x / self.scale for x in [self.dxy, self.dxy]]
 
@@ -518,30 +524,44 @@ class Train_RDL_Denoising(tf.keras.Model):
         input_width = x.shape[2]
         batch_size = x.shape[0]
         channels = x.shape[-1]
-        
+        tensorboard_callback = callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
+        lrate = callbacks.ReduceLROnPlateau(monitor='loss', factor=0.1, patience=4, verbose=1)
+        hrate = callbacks.History()
+        srate = callbacks.ModelCheckpoint(
+                    str(self.den_model_dir),
+                    monitor="loss",
+                    save_best_only=False,
+                    save_weights_only=False,
+                    mode="auto",
+                )
         sr_y_predict = self.srmodel.predict(x)
         sr_y_predict = tf.squeeze(sr_y_predict, axis=-1) # Batch, Ny, Nx, 1 
         # Loop over each example in the batch
-        for i in tqdm(range(batch_size)):
+        for i in range(batch_size):
             # Get the current example
-            img_in = x[i:i+1]  # Extract the i-th example from the batch
-            img_SR = sr_y_predict[i:i+1]  # Extract the corresponding SR output
-            image_gt = y[i:i+1]
+            img_in = x[i:i+1][0]  # Extract the i-th example from the batch
+            img_SR = sr_y_predict[i:i+1][0]   # Extract the corresponding SR output
+            image_gt = y[i:i+1][0] 
             cur_k0, cur_k0_angle, modamp = self._get_cur_k(image_gt=image_gt)
             
             image_gen = self._phase_computation(img_SR, modamp, cur_k0_angle, cur_k0)
-            if i == 0:
-              print(i, img_in.shape, img_SR.shape, image_gt.shape, image_gen.shape)
-            # Train denoising
-            #with tf.GradientTape() as tape:
-            #    y_pred = self.denmodel(img_in, training=True) 
-            #    loss = self.loss_fn(y[i:i+1], y_pred)  
-
-            #trainable_vars = self.denmodel.trainable_variables
-            #gradients = tape.gradient(loss, trainable_vars)
-
-            #self.optimizer.apply_gradients(zip(gradients, trainable_vars))
-
-            #self.compiled_metrics.update_state(y[i:i+1], y_pred)
-
-        #return {m.name: m.result() for m in self.metrics}
+            image_gen = np.transpose(image_gen, (1, 2, 0))
+           
+            input_MPE_batch = []
+            input_PFE_batch = []
+            gt_batch = []
+            for i in range(self.ndirs):
+                input_MPE_batch.append(image_gen[:, :, i * self.nphases:(i + 1) * self.nphases])
+                input_PFE_batch.append(img_in[:, :, i * self.nphases:(i + 1) * self.nphases])
+                gt_batch.append(image_gt[:, :, i * self.nphases:(i + 1) * self.nphases])
+            input_MPE_batch = np.array(input_MPE_batch)
+            input_PFE_batch = np.array(input_PFE_batch)
+            print(input_MPE_batch.shape, input_PFE_batch.shape)
+            gt_batch = np.array(gt_batch)
+            
+            
+            self.denmodel.fit([input_MPE_batch, input_PFE_batch], gt_batch, batch_size=batch_size,
+                               epochs=self.epochs, shuffle=True,
+                               callbacks=[lrate, hrate, srate, tensorboard_callback])
+            
+            self.denmodel.save(self.den_model_dir)
