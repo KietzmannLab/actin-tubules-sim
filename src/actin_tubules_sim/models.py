@@ -20,6 +20,7 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.models import Model
 from .sim_fitting import cal_modamp, create_psf
 import cv2 
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from csbdeep.utils import normalize
 from tensorflow.keras import callbacks
@@ -427,13 +428,14 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
 
 
 class Train_RDL_Denoising(tf.keras.Model):
-    def __init__(self, srmodel, denmodel, loss_fn, optimizer,  parameters, PSF = None):
+    def __init__(self, srmodel, denmodel, loss_fn, optimizer,  parameters, PSF = None, verbose = True):
         super().__init__()
         self.srmodel = srmodel
         self.denmodel = denmodel
         self.loss_fn = loss_fn
         self.optimizer = optimizer
         self.PSF = PSF
+        self.verbose = verbose
         self.parameters = parameters 
         self.epochs = self.parameters['epochs']
         self.nphases = self.parameters['nphases']
@@ -523,7 +525,7 @@ class Train_RDL_Denoising(tf.keras.Model):
         assert C % self.ndirs == 0, "The last dimension must be divisible by 3"
         new_batch_size = B * (C // self.ndirs)
         return batch.reshape(new_batch_size, H, W, self.nphases)
-
+    
     def fit(self, data, data_val):
         x, y = data
         x_val, y_val = data_val
@@ -567,10 +569,34 @@ class Train_RDL_Denoising(tf.keras.Model):
         input_PFE_batch = self.reshape_to_3_channels(input_PFE_batch)
         gt_batch = self.reshape_to_3_channels(gt_batch)    
         
-        print(f'input MPE {input_MPE_batch.shape}, input PFE {input_PFE_batch.shape},gt {gt_batch.shape}')
-        
+        if self.verbose:
+            print(f'input MPE {input_MPE_batch.shape}, input PFE {input_PFE_batch.shape},gt {gt_batch.shape}')
+            plot_batches(input_MPE_batch, input_PFE_batch, gt_batch)
         self.denmodel.fit([input_MPE_batch, input_PFE_batch], gt_batch, batch_size=self.batch_size,
                             epochs=self.epochs, shuffle=True,
                             callbacks=[lrate, hrate, srate, tensorboard_callback])
         
         self.denmodel.save(self.den_model_dir)
+        
+        
+def plot_batches(input_MPE_batch, input_PFE_batch, gt_batch):
+    num_batches = input_MPE_batch.shape[0]
+    random_indices = np.random.choice(num_batches, 5, replace=False)
+    
+    fig, axes = plt.subplots(5, 3, figsize=(15, 15))
+    
+    for i, idx in enumerate(random_indices):
+        axes[i, 0].imshow(input_MPE_batch[idx])
+        axes[i, 0].set_title(f'input MPE batch {idx}')
+        axes[i, 0].axis('off')
+
+        axes[i, 1].imshow(input_PFE_batch[idx])
+        axes[i, 1].set_title(f'input PFE batch {idx}')
+        axes[i, 1].axis('off')
+
+        axes[i, 2].imshow(gt_batch[idx])
+        axes[i, 2].set_title(f'gt batch {idx}')
+        axes[i, 2].axis('off')
+    
+    plt.tight_layout()
+    plt.show()        
