@@ -517,7 +517,13 @@ class Train_RDL_Denoising(tf.keras.Model):
         return cur_k0, cur_k0_angle, modamp
     
 
-    
+    def reshape_to_3_channels(self, batch):
+        
+        B, H, W, C = batch.shape
+        assert C % self.ndirs == 0, "The last dimension must be divisible by 3"
+        new_batch_size = B * (C // self.ndirs)
+        return batch.reshape(new_batch_size, H, W, self.nphases)
+
     def fit(self, data, data_val):
         x, y = data
         x_val, y_val = data_val
@@ -553,21 +559,15 @@ class Train_RDL_Denoising(tf.keras.Model):
             list_image_in.append(img_in)
             list_image_gt.append(image_gt)
         
-        list_image_gen = np.asarray(list_image_gen)
-        list_image_in = np.asarray(list_image_in)
-        list_image_gt = np.asarray(list_image_gt)     
-        input_MPE_batch = []
-        input_PFE_batch = []
-        gt_batch = []
-        for i in range(self.ndirs):
-            input_MPE_batch.append(list_image_gen[:, :, i * self.nphases:(i + 1) * self.nphases])
-            input_PFE_batch.append(list_image_in[:, :, i * self.nphases:(i + 1) * self.nphases])
-            gt_batch.append(list_image_gt[:, :, i * self.nphases:(i + 1) * self.nphases])
-        input_MPE_batch = np.array(input_MPE_batch)
-        input_PFE_batch = np.array(input_PFE_batch)
-        print(input_MPE_batch.shape, input_PFE_batch.shape, list_image_gen.shape, list_image_gt.shape, list_image_in.shape)
-        gt_batch = np.array(gt_batch)
+        input_MPE_batch = np.asarray(list_image_gen)
+        input_PFE_batch = np.asarray(list_image_in)
+        gt_batch = np.asarray(list_image_gt) 
         
+        input_MPE_batch = self.reshape_to_3_channels(input_MPE_batch)
+        input_PFE_batch = self.reshape_to_3_channels(input_PFE_batch)
+        gt_batch = self.reshape_to_3_channels(gt_batch)    
+        
+        print(f'input MPE {input_MPE_batch.shape}, input PFE {input_PFE_batch.shape},gt {gt_batch.shape}')
         
         self.denmodel.fit([input_MPE_batch, input_PFE_batch], gt_batch, batch_size=self.batch_size,
                             epochs=self.epochs, shuffle=True,
