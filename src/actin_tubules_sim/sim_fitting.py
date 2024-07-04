@@ -1,7 +1,7 @@
 import numpy as np 
 import numpy.fft as F
 from scipy.interpolate import interp1d
-
+import matplotlib.pyplot as plt 
 
 def make_matrix(nphases, norders):
     sepMatrix = np.zeros((2*norders-1, nphases))
@@ -19,6 +19,16 @@ def make_matrix(nphases, norders):
 
 
 def apodize(napodize, image):
+    """
+    Apply apodization to the input image to smooth its edges.
+    
+    Parameters:
+    napodize (int): The number of pixels to apply the apodization.
+    image (np.ndarray): The input 3D image to be apodized (height x width x channels).
+    
+    Returns:
+    np.ndarray: The apodized image.
+    """
     # Initialize apoimage as a copy of the input image
     apoimage = image.copy()
     
@@ -30,18 +40,22 @@ def apodize(napodize, image):
         # Apply vertical apodization
         imageUp = image[:napodize, :, :]
         imageDown = image[-napodize:, :, :]
-        diff = (imageDown[::-1, :, :] - imageUp) / 2
-        factor = diff * fact[:, None, None]
-        apoimage[:napodize, :, :] = imageUp + factor
-        apoimage[-napodize:, :, :] = imageDown - factor[::-1, :, :]
+        diff_up = (imageUp - imageUp[::-1, :, :]) / 2
+        diff_down = (imageDown[::-1, :, :] - imageDown) / 2
+        factor_up = diff_up * fact[:, None, None]
+        factor_down = diff_down * fact[:, None, None]
+        apoimage[:napodize, :, :] = imageUp - factor_up
+        apoimage[-napodize:, :, :] = imageDown - factor_down[::-1, :, :]
 
         # Apply horizontal apodization
         imageLeft = apoimage[:, :napodize, :]
         imageRight = apoimage[:, -napodize:, :]
-        diff = (imageRight[:, ::-1, :] - imageLeft) / 2
-        factor = diff * fact[None, :, None]
-        apoimage[:, :napodize, :] = imageLeft + factor
-        apoimage[:, -napodize:, :] = imageRight - factor[:, ::-1, :]
+        diff_left = (imageLeft - imageLeft[:, ::-1, :]) / 2
+        diff_right = (imageRight[:, ::-1, :] - imageRight) / 2
+        factor_left = diff_left * fact[None, :, None]
+        factor_right = diff_right * fact[None, :, None]
+        apoimage[:, :napodize, :] = imageLeft - factor_left
+        apoimage[:, -napodize:, :] = imageRight - factor_right[:, ::-1, :]
 
     return apoimage
 
@@ -49,7 +63,7 @@ def apodize(napodize, image):
 
 
 def makeoverlaps(bands, Nx, Ny, order1, order2, k0x, k0y, dxy, dz, OTF, lamda):
-    otfcutoff = 0.005
+ 
     kx = k0x * (order2 - order1)
     ky = k0y * (order2 - order1)
 
@@ -97,9 +111,9 @@ def makeoverlaps(bands, Nx, Ny, order1, order2, k0x, k0y, dxy, dz, OTF, lamda):
     OTF1_sk0_mag = np.abs(OTF1_sk0)
     OTF2_sk0_mag = np.abs(OTF2_sk0)
 
-    mask1 = mask1 & (OTF1_mag > otfcutoff) & (OTF2_sk0_mag > otfcutoff)
-    mask2 = mask2 & (OTF1_sk0_mag > otfcutoff) & (OTF2_mag > otfcutoff)
 
+
+    
     root1 = np.sqrt(OTF1_mag**2 + OTF2_sk0_mag**2)
     root2 = np.sqrt(OTF1_sk0_mag**2 + OTF2_mag**2)
 
@@ -157,12 +171,12 @@ def fitxyparabola(x1, y1, x2, y2, x3, y3):
     
     # Check for equal points
     mask_invalid = (x1 == x2) | (x2 == x3) | (x3 == x1)
-    
+    eps = 1.0e-10
     # Compute intermediate values
     xbar1 = 0.5 * (x1 + x2)
     xbar2 = 0.5 * (x2 + x3)
-    slope1 = (y2 - y1) / (x2 - x1)
-    slope2 = (y3 - y2) / (x3 - x2)
+    slope1 = (y2 - y1) / (x2 - x1 + eps)
+    slope2 = (y3 - y2) / (x3 - x2 + eps)
     curve = (slope2 - slope1) / (xbar2 - xbar1)
     
     # Compute peak

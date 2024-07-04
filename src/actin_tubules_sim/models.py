@@ -473,10 +473,19 @@ class Train_RDL_Denoising(tf.keras.Model):
                         self.dky)
         else:
             self.PSF /= np.sum(self.PSF)  
-            self.OTF = abs(F.ifftshift(F.ifft2(self.PSF)))
+            self.OTF = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(self.PSF)))
             self.OTF /= np.sum(self.OTF)
+        
+        if self.verbose:
+            fig, axes = plt.subplots(1, 2, figsize=(15, 15))
+            axes[0].imshow(self.PSF)
+            axes[0].set_title('PSF')
+            
+            axes[1].imshow(abs(self.OTF))
+            axes[1].set_title('OTF')
 
-    
+            plt.tight_layout()
+            plt.show()
     
     def _phase_computation(self, img_SR, modamp, cur_k0_angle, cur_k0):
 
@@ -484,6 +493,7 @@ class Train_RDL_Denoising(tf.keras.Model):
             img_gen = []
             for d in range(self.ndirs):
                 alpha = cur_k0_angle[d]
+                
                 for i in range(self.nphases):
                     kxL = cur_k0[d] * np.pi * np.cos(alpha)
                     kyL = cur_k0[d] * np.pi * np.sin(alpha)
@@ -494,11 +504,11 @@ class Train_RDL_Denoising(tf.keras.Model):
                     pattern = normalize(np.square(np.abs(interBeam)))
                     patterned_img_fft = F.fftshift(F.fft2(pattern * img_SR)) * self.OTF
                     modulated_img = np.abs(F.ifft2(F.ifftshift(patterned_img_fft)))
-                    modulated_img = cv2.resize(modulated_img, (self.Ny, self.Nx))    
+                    modulated_img = normalize(cv2.resize(modulated_img, (self.Ny, self.Nx)))    
                     img_gen.append(modulated_img)
-            
-            img_gen = normalize(np.asarray(img_gen))
-            
+          
+           
+            img_gen = np.asarray(img_gen)
             
             return img_gen
     
@@ -506,7 +516,7 @@ class Train_RDL_Denoising(tf.keras.Model):
     def _get_cur_k(self, image_gt):
         
         cur_k0, modamp = cal_modamp(np.array(image_gt).astype(np.float32), self.OTF, self.parameters)
-        cur_k0_angle = np.array(np.arctan(cur_k0[:, 1] / cur_k0[:, 0]))
+        cur_k0_angle = np.array(np.arctan2(cur_k0[:, 1] , cur_k0[:, 0]))
         cur_k0_angle[1:self.parameters['ndirs']] = cur_k0_angle[1:self.parameters['ndirs']] + np.pi
         cur_k0_angle = -(cur_k0_angle - np.pi/2)
         for nd in range(self.parameters['ndirs']):
@@ -515,7 +525,8 @@ class Train_RDL_Denoising(tf.keras.Model):
         cur_k0 = np.sqrt(np.sum(np.square(cur_k0), 1))
         given_k0 = 1 / self.parameters['space']
         cur_k0[np.abs(cur_k0 - given_k0) > 0.1] = given_k0
-    
+            
+       
         return cur_k0, cur_k0_angle, modamp
     
 
