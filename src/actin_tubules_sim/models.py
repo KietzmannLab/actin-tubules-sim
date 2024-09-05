@@ -428,7 +428,7 @@ def Denoiser(input_shape, n_rg=(2, 5, 5)):
 
 
 class Train_RDL_Denoising(tf.keras.Model):
-    def __init__(self, srmodel, denmodel, loss_fn, optimizer,  parameters, PSF = None, verbose = True):
+    def __init__(self, srmodel, denmodel, loss_fn, optimizer,  parameters, PSF = None, verbose = False):
         super().__init__()
         self.srmodel = srmodel
         self.denmodel = denmodel
@@ -543,6 +543,8 @@ class Train_RDL_Denoising(tf.keras.Model):
         input_height = x.shape[1]
         input_width = x.shape[2]
         channels = x.shape[-1]
+        
+        print(f'Input data {x.shape}')
         tensorboard_callback = callbacks.TensorBoard(log_dir=self.log_dir, histogram_freq=1)
         lrate = callbacks.ReduceLROnPlateau(monitor='loss', factor=0.1, patience=4, verbose=1)
         hrate = callbacks.History()
@@ -580,9 +582,10 @@ class Train_RDL_Denoising(tf.keras.Model):
         input_PFE_batch = self.reshape_to_3_channels(input_PFE_batch)
         gt_batch = self.reshape_to_3_channels(gt_batch)    
         
+        print(f'input MPE {input_MPE_batch.shape}, input PFE {input_PFE_batch.shape},gt {gt_batch.shape}')
         if self.verbose:
-            print(f'input MPE {input_MPE_batch.shape}, input PFE {input_PFE_batch.shape},gt {gt_batch.shape}')
             plot_batches(input_MPE_batch, input_PFE_batch, gt_batch)
+            
         self.denmodel.fit([input_MPE_batch, input_PFE_batch], gt_batch, batch_size=self.batch_size,
                             epochs=self.epochs, shuffle=True,
                             callbacks=[lrate, hrate, srate, tensorboard_callback])
