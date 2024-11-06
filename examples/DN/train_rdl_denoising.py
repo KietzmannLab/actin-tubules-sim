@@ -6,6 +6,7 @@ from actin_tubules_sim.models import Denoiser, Train_RDL_Denoising
 from actin_tubules_sim.loss import mse_ssim
 import tensorflow as tf
 import os
+import math
 from pathlib import Path
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import callbacks
@@ -57,8 +58,8 @@ k0mod = 1 / space
 napodize = 10
 nphases = 3
 ndirs = 3
-sigma_x = 0.5
-sigma_y = 0.5
+sigma_x = 2.3/math.sqrt(2)
+sigma_y = 2.3/math.sqrt(2)
 recalcarrays = 2
 ifshowmodamp = 0
 norders = int((nphases + 1) / 2)
